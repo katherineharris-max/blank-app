@@ -7,19 +7,29 @@ student-focused financial model.
 
 ## Model
 
-The primary input is the number of students. The app calculates these outputs
-for both scenarios:
+The app calculates these outputs for the base case subscription type and the
+alternative option:
 
 - Order volume
 - Monthly active users (MAU)
 - Variable profit
 
-The model uses scenario assumptions for MAU rate, orders per MAU, and variable
-profit per order:
+Inputs:
+
+- Variable profit per subscription type
+- Number of students at start of Year 1
+- Number of students that churn after Year 1
+- Number of new students in Year 2
+- Average order frequency per subscription type
+
+The model treats each student count as monthly active users for the year and
+uses the subscription type assumptions to calculate annual order volume and
+variable profit:
 
 ```text
-MAU = students x MAU rate
-Order volume = MAU x orders per MAU
+Year 1 MAU = students at start of Year 1
+Year 2 MAU = Year 1 students - churn after Year 1 + new students in Year 2
+Order volume = MAU x average monthly order frequency x 12
 Variable profit = order volume x variable profit per order
 ```
 
