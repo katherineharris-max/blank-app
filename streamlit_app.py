@@ -677,9 +677,9 @@ def render_vertical_section(filtered: pd.DataFrame) -> pd.DataFrame:
 
     col_a, col_b = st.columns([1.15, 1])
     with col_a:
-        st.altair_chart(revenue_spend_chart, use_container_width=True)
+        st.altair_chart(revenue_spend_chart, width="stretch")
     with col_b:
-        st.altair_chart(roas_chart, use_container_width=True)
+        st.altair_chart(roas_chart, width="stretch")
 
     return vertical_summary
 
@@ -737,9 +737,9 @@ def render_campaign_section(filtered: pd.DataFrame) -> pd.DataFrame:
 
     col_a, col_b = st.columns([1.1, 1])
     with col_a:
-        st.altair_chart(scatter, use_container_width=True)
+        st.altair_chart(scatter, width="stretch")
     with col_b:
-        st.altair_chart(ranking, use_container_width=True)
+        st.altair_chart(ranking, width="stretch")
 
     return campaign_summary
 
@@ -782,7 +782,7 @@ def render_funnel(filtered: pd.DataFrame) -> None:
         )
         .properties(height=250)
     )
-    st.altair_chart(chart, use_container_width=True)
+    st.altair_chart(chart, width="stretch")
 
 
 def render_insights(
@@ -850,7 +850,7 @@ def render_tracker_table(campaign_summary: pd.DataFrame) -> None:
     table = table.drop(columns=["ctr", "lead_rate", "conversion_rate"])
     st.dataframe(
         table,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         column_config={
             "campaign": "Campaign",
