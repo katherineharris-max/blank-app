@@ -19,7 +19,6 @@ BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
 
 def week_commencing_mondays(start: date, end: date) -> list[date]:
     """Return Mondays from start through end inclusive."""
-    # Move to first Monday on/after start
     d = start
     while d.weekday() != 0:
         d += timedelta(days=1)
@@ -43,97 +42,102 @@ def style_range(ws, cell_range, fill=None, font=None, border=True, align_center=
                 cell.alignment = Alignment(horizontal="center", vertical="center")
 
 
-def write_table(ws, start_row: int, title: str, period_label: str, periods: list[str]) -> int:
-    """Write one forecast table. Returns next free row."""
-    last_col = 2 + len(MARKETS)  # A=period, B-G=markets, H=total
-    total_col = get_column_letter(last_col)
-    first_market_col = "B"
-    last_market_col = get_column_letter(1 + len(MARKETS))
+def write_table(ws, start_row: int, title: str, row_label: str, periods: list[str]) -> int:
+    """Write one forecast table with countries as rows and periods as columns."""
+    first_period_col = 2
+    last_period_col = first_period_col + len(periods) - 1
+    total_col = last_period_col + 1
+    last_col_letter = get_column_letter(total_col)
+    first_period_letter = get_column_letter(first_period_col)
+    last_period_letter = get_column_letter(last_period_col)
 
     ws.cell(start_row, 1, title).font = SECTION_FONT
     ws.cell(start_row, 1).fill = SECTION_FILL
-    ws.merge_cells(start_row=start_row, start_column=1, end_row=start_row, end_column=last_col)
-    style_range(ws, f"A{start_row}:{total_col}{start_row}", fill=SECTION_FILL, font=SECTION_FONT)
+    ws.merge_cells(
+        start_row=start_row,
+        start_column=1,
+        end_row=start_row,
+        end_column=total_col,
+    )
+    style_range(
+        ws,
+        f"A{start_row}:{last_col_letter}{start_row}",
+        fill=SECTION_FILL,
+        font=SECTION_FONT,
+    )
 
     header_row = start_row + 1
-    headers = [period_label, *MARKETS, "Total"]
+    headers = [row_label, *periods, "Total"]
     for col, value in enumerate(headers, start=1):
         ws.cell(header_row, col, value)
     style_range(
         ws,
-        f"A{header_row}:{total_col}{header_row}",
+        f"A{header_row}:{last_col_letter}{header_row}",
         fill=HEADER_FILL,
         font=HEADER_FONT,
         align_center=True,
     )
-    ws.column_dimensions["A"].width = 18
-    for idx in range(2, last_col + 1):
-        ws.column_dimensions[get_column_letter(idx)].width = 14
+
+    ws.column_dimensions["A"].width = 14
+    for col in range(first_period_col, total_col + 1):
+        ws.column_dimensions[get_column_letter(col)].width = 12
 
     data_start = header_row + 1
-    for i, period in enumerate(periods):
+    for i, market in enumerate(MARKETS):
         row = data_start + i
-        ws.cell(row, 1, period)
-        for col in range(2, last_col):
+        ws.cell(row, 1, market)
+        for col in range(first_period_col, total_col):
             ws.cell(row, col, "")
-        ws.cell(row, last_col, f"=SUM({first_market_col}{row}:{last_market_col}{row})")
-        style_range(ws, f"A{row}:{total_col}{row}")
-
-    total_row = data_start + len(periods)
-    ws.cell(total_row, 1, "Total")
-    ws.cell(total_row, 1).font = Font(bold=True)
-    for col in range(2, last_col + 1):
-        col_letter = get_column_letter(col)
         ws.cell(
-            total_row,
-            col,
-            f"=SUM({col_letter}{data_start}:{col_letter}{total_row - 1})",
+            row,
+            total_col,
+            f"=SUM({first_period_letter}{row}:{last_period_letter}{row})",
         )
-        ws.cell(total_row, col).font = Font(bold=True)
-    style_range(ws, f"A{total_row}:{total_col}{total_row}")
+        style_range(ws, f"A{row}:{last_col_letter}{row}")
 
-    return total_row + 2
+    return data_start + len(MARKETS) + 2
 
 
 def build_weekly_sheet(wb: Workbook):
     ws = wb.active
     ws.title = "Weekly"
     weeks = week_commencing_mondays(date(2026, 7, 1), date(2026, 12, 31))
-    period_labels = [f"W/C {d.strftime('%d-%b-%Y')}" for d in weeks]
+    period_labels = [f"W/C {d.strftime('%d-%b')}" for d in weeks]
+    last_col = get_column_letter(2 + len(period_labels))
 
     ws["A1"] = "H2 2026 Forecast — Weekly View"
     ws["A1"].font = Font(bold=True, size=14)
-    ws.merge_cells("A1:H1")
+    ws.merge_cells(f"A1:{last_col}1")
 
     row = 3
-    row = write_table(ws, row, "SPEND", "Week", period_labels)
-    write_table(ws, row, "TRAFFIC", "Week", period_labels)
+    row = write_table(ws, row, "SPEND", "Country", period_labels)
+    write_table(ws, row, "TRAFFIC", "Country", period_labels)
 
 
 def build_monthly_sheet(wb: Workbook):
     ws = wb.create_sheet("Monthly")
-    periods = ["Jul-2026", "Aug-2026", "Sep-2026", "Oct-2026", "Nov-2026", "Dec-2026"]
+    periods = ["Jul-26", "Aug-26", "Sep-26", "Oct-26", "Nov-26", "Dec-26"]
 
     ws["A1"] = "H2 2026 Forecast — Monthly View"
     ws["A1"].font = Font(bold=True, size=14)
-    ws.merge_cells("A1:H1")
+    ws.merge_cells("A1:I1")
 
     row = 3
-    row = write_table(ws, row, "SPEND", "Month", periods)
-    write_table(ws, row, "TRAFFIC", "Month", periods)
+    row = write_table(ws, row, "SPEND", "Country", periods)
+    write_table(ws, row, "TRAFFIC", "Country", periods)
 
 
 def build_quarterly_sheet(wb: Workbook):
     ws = wb.create_sheet("Quarterly")
-    periods = ["Q3 2026 (Jul-Sep)", "Q4 2026 (Oct-Dec)", "H2 2026 Total"]
+    periods = ["Q3 2026", "Q4 2026"]
 
     ws["A1"] = "H2 2026 Forecast — Quarterly View"
     ws["A1"].font = Font(bold=True, size=14)
-    ws.merge_cells("A1:H1")
+    ws.merge_cells("A1:E1")
 
     row = 3
-    row = write_table(ws, row, "SPEND", "Quarter", periods)
-    write_table(ws, row, "TRAFFIC", "Quarter", periods)
+    row = write_table(ws, row, "SPEND", "Country", periods)
+    write_table(ws, row, "TRAFFIC", "Country", periods)
 
 
 def build_readme_sheet(wb: Workbook):
@@ -141,22 +145,21 @@ def build_readme_sheet(wb: Workbook):
     lines = [
         "H2 2026 Forecast Template",
         "",
+        "Layout: countries as rows, time periods as columns",
         "Markets: UKI, France, Belgium, UAE, KW, Italy",
         "Tabs: Weekly, Monthly, Quarterly",
         "Each tab contains two tables: SPEND and TRAFFIC",
+        "Each row includes a Total column summing values across periods",
         "",
         "Import into Google Sheets:",
         "1. File > Import > Upload > select this file",
         "2. Choose 'Replace spreadsheet' or 'Insert new sheet(s)'",
-        "",
-        "Sheet URL target:",
-        "https://docs.google.com/spreadsheets/d/1z-sr3zo15-ehHzbOqTejCZGTKHRaNaxJ_g7G2eVuoUI/edit",
     ]
     for i, line in enumerate(lines, start=1):
         ws.cell(i, 1, line)
         if i == 1:
             ws.cell(i, 1).font = Font(bold=True, size=14)
-    ws.column_dimensions["A"].width = 80
+    ws.column_dimensions["A"].width = 70
 
 
 def main():
