@@ -1,19 +1,24 @@
-# 🎈 Blank app template
+# Cohort LTV dashboard
 
-A simple Streamlit app template for you to modify!
+Streamlit dashboard that models customer **LTV**, **VP** (variable profit), average order frequency, and average tenure for four cohorts:
 
-[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://blank-app-template.streamlit.app/)
+- New subscriber
+- Existing subscriber
+- New PAYG
+- Existing PAYG
 
-### How to run it on your own machine
+Fake metrics live in `data/cohort_metrics.csv` and regenerate once per calendar day (seeded by date). Edit assumptions in the UI to forecast customers and compare investment scenarios.
 
-1. Install the requirements
+### How to run
 
-   ```
-   $ pip install -r requirements.txt
-   ```
+```bash
+pip install -r requirements.txt
+python scripts/generate_data.py   # optional; app also refreshes on load
+streamlit run streamlit_app.py
+```
 
-2. Run the app
+### Daily refresh
 
-   ```
-   $ streamlit run streamlit_app.py
-   ```
+- Automatic: opening the app rewrites the CSV when `as_of_date` is not today.
+- Manual: sidebar **Refresh today's data**, or `python scripts/generate_data.py`.
+- Production: replace `src/cohort_data.py` load path with your warehouse query; keep the same column names.
