@@ -1,4 +1,4 @@
-"""Customer cohort LTV dashboard — editable assumptions + forward Cx forecast."""
+"""Customer cohort LTV dashboard — tenure curves, calculated LTV, forecasts."""
 
 from __future__ import annotations
 
@@ -11,7 +11,13 @@ import streamlit as st
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from cohort_data import load_cohort_data, refresh_dataset  # noqa: E402
+from cohort_panel import load_panel, refresh_panel  # noqa: E402
+from ltv import (  # noqa: E402
+    average_tenure_curve,
+    calculate_cohort_ltv,
+    vintage_ltv_to_date,
+    write_summary,
+)
 
 st.set_page_config(
     page_title="Cohort LTV Dashboard",
@@ -19,245 +25,264 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title("Cohort LTV & investment dashboard")
+st.title("Cohort LTV over time")
 st.caption(
-    "Model lifetime value (LTV), variable profit (VP), order frequency, and tenure "
-    "by customer cohort. Edit assumptions to forecast future customers and compare "
-    "investment scenarios. Fake data regenerates once per calendar day."
+    "Fake monthly panel for **NC Sub**, **EC Sub**, **PAYG NC**, and **PAYG EC**. "
+    "Order rate and VP evolve by tenure (M1, M2, …). LTV is calculated from those "
+    "curves and feeds the forecast below."
 )
 
 
 @st.cache_data(ttl=60 * 60)
-def get_data(force: bool = False) -> pd.DataFrame:
-    return refresh_dataset(force=force) if force else load_cohort_data()
+def get_panel(force: bool = False) -> pd.DataFrame:
+    return refresh_panel(force=force) if force else load_panel()
 
 
 with st.sidebar:
     st.header("Controls")
-    if st.button("Refresh today's data", help="Regenerate the fake daily snapshot"):
+    if st.button("Refresh today's data"):
         st.cache_data.clear()
-        get_data(force=True)
+        get_panel(force=True)
         st.rerun()
 
-    horizon = st.slider("Forecast horizon (months)", 1, 24, 12)
+    horizon = st.slider("LTV / forecast horizon (months)", 6, 36, 24)
+    monthly_discount = st.slider(
+        "Monthly discount rate",
+        min_value=0.0,
+        max_value=0.05,
+        value=0.0,
+        step=0.005,
+        help="0 = no discount. 0.01 ≈ 1% per month time value of money.",
+    )
     st.divider()
     st.markdown(
-        "**How to use**\n\n"
-        "1. Review baseline metrics from today's fake dataset.\n"
-        "2. Tweak LTV, VP, frequency, tenure, or acquisition in the table.\n"
-        "3. Read the forecast and scenario totals below."
+        "**LTV formula**\n\n"
+        "`contribution(t) = retention × order rate × VP / order`\n\n"
+        "`LTV = sum of contribution from M1 → horizon`\n\n"
+        "Edit the curve multipliers below to stress-test investment cases."
     )
 
-df = get_data().copy()
-as_of = df["as_of_date"].iloc[0]
-st.info(f"Dataset as of **{as_of}** · linked file: `data/cohort_metrics.csv`")
+panel = get_panel().copy()
+as_of = panel["as_of_date"].iloc[0]
+st.info(
+    f"Dataset as of **{as_of}** · **{len(panel):,}** rows · "
+    f"`data/cohort_panel.csv` (refreshes once per day)"
+)
 
-# --- Baseline snapshot ---
-st.subheader("1. Baseline cohort metrics")
-baseline_view = df[
+# --- Calculated LTV ---
+summary = calculate_cohort_ltv(
+    panel, horizon_months=horizon, monthly_discount=monthly_discount
+)
+write_summary(summary)
+
+st.subheader("1. Calculated LTV by cohort")
+st.write(
+    "Observed = sum of the average tenure curve so far. "
+    "Projected = same curve extended to your horizon (with optional discount)."
+)
+
+ltv_view = summary[
     [
         "cohort_label",
-        "customers",
-        "ltv",
-        "vp",
-        "avg_order_frequency",
-        "avg_tenure_months",
-        "monthly_acquisition",
+        "ltv_observed",
+        "ltv_projected",
+        "avg_m1_order_rate",
+        "avg_m1_vp_per_order",
+        "avg_starting_customers",
+        "months_observed",
     ]
 ].rename(
     columns={
         "cohort_label": "Cohort",
-        "customers": "Customers",
-        "ltv": "LTV ($)",
-        "vp": "VP ($)",
-        "avg_order_frequency": "Avg orders / month",
-        "avg_tenure_months": "Avg tenure (months)",
-        "monthly_acquisition": "New Cx / month",
+        "ltv_observed": "LTV observed ($)",
+        "ltv_projected": "LTV projected ($)",
+        "avg_m1_order_rate": "M1 order rate",
+        "avg_m1_vp_per_order": "M1 VP / order ($)",
+        "avg_starting_customers": "Avg starting Cx / vintage",
+        "months_observed": "Months in curve",
     }
 )
-st.dataframe(baseline_view, use_container_width=True, hide_index=True)
+st.dataframe(ltv_view, use_container_width=True, hide_index=True)
 
-# --- Editable assumptions ---
-st.subheader("2. Editable assumptions (what-if)")
-st.write(
-    "Change any value. Forecasts update immediately. "
-    "VP = variable profit per customer (contribution after variable costs)."
-)
-
-edit_seed = df[
-    [
-        "cohort",
-        "cohort_label",
-        "customers",
-        "ltv",
-        "vp",
-        "avg_order_frequency",
-        "avg_tenure_months",
-        "monthly_acquisition",
-    ]
-].copy()
-
-edited = st.data_editor(
-    edit_seed,
-    hide_index=True,
-    use_container_width=True,
-    disabled=["cohort", "cohort_label"],
-    column_config={
-        "cohort": None,
-        "cohort_label": st.column_config.TextColumn("Cohort", width="medium"),
-        "customers": st.column_config.NumberColumn("Customers", min_value=0, step=100),
-        "ltv": st.column_config.NumberColumn("LTV ($)", min_value=0.0, format="%.2f"),
-        "vp": st.column_config.NumberColumn("VP ($)", min_value=0.0, format="%.2f"),
-        "avg_order_frequency": st.column_config.NumberColumn(
-            "Avg orders / month", min_value=0.0, format="%.2f"
-        ),
-        "avg_tenure_months": st.column_config.NumberColumn(
-            "Avg tenure (months)", min_value=0.0, format="%.2f"
-        ),
-        "monthly_acquisition": st.column_config.NumberColumn(
-            "New Cx / month", min_value=0, step=50
-        ),
-    },
-    key="assumption_editor",
-)
-
-assumptions = edited.copy()
-assumptions["portfolio_ltv"] = assumptions["customers"] * assumptions["ltv"]
-assumptions["portfolio_vp"] = assumptions["customers"] * assumptions["vp"]
-assumptions["implied_orders_per_cx"] = (
-    assumptions["avg_order_frequency"] * assumptions["avg_tenure_months"]
-)
-
-# --- KPI row ---
-st.subheader("3. Portfolio snapshot (from your assumptions)")
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Total customers", f"{int(assumptions['customers'].sum()):,}")
-c2.metric("Portfolio LTV", f"${assumptions['portfolio_ltv'].sum():,.0f}")
-c3.metric("Portfolio VP", f"${assumptions['portfolio_vp'].sum():,.0f}")
-weighted_ltv = (
-    assumptions["portfolio_ltv"].sum() / assumptions["customers"].sum()
-    if assumptions["customers"].sum()
-    else 0
-)
-c4.metric("Blended LTV / Cx", f"${weighted_ltv:,.2f}")
+for col, (_, row) in zip((c1, c2, c3, c4), summary.iterrows()):
+    col.metric(row["cohort_label"], f"${row['ltv_projected']:,.0f}", help="Projected LTV")
 
-# --- Forecast ---
-st.subheader(f"4. Forward customer forecast ({horizon} months)")
+# --- What-if multipliers ---
+st.subheader("2. Stress-test the curve (multipliers)")
 st.write(
-    "Simple model: each month adds *New Cx / month* for new cohorts; "
-    "existing cohorts hold base size (no churn in this demo). "
-    "New customers contribute LTV and VP at your edited rates."
+    "Change these to model better/worse economics. "
+    "1.0 = baseline from the fake data. 1.1 = +10%."
 )
 
-months = list(range(1, horizon + 1))
+mult_cols = st.columns(4)
+multipliers = {}
+for col, (_, row) in zip(mult_cols, summary.iterrows()):
+    with col:
+        multipliers[row["cohort"]] = {
+            "label": row["cohort_label"],
+            "order": st.number_input(
+                f"{row['cohort_label']} order-rate ×",
+                min_value=0.5,
+                max_value=1.5,
+                value=1.0,
+                step=0.05,
+                key=f"ord_{row['cohort']}",
+            ),
+            "vp": st.number_input(
+                f"{row['cohort_label']} VP/order ×",
+                min_value=0.5,
+                max_value=1.5,
+                value=1.0,
+                step=0.05,
+                key=f"vp_{row['cohort']}",
+            ),
+            "retention": st.number_input(
+                f"{row['cohort_label']} retention ×",
+                min_value=0.5,
+                max_value=1.5,
+                value=1.0,
+                step=0.05,
+                key=f"ret_{row['cohort']}",
+            ),
+        }
+
+stressed = panel.copy()
+for cohort, m in multipliers.items():
+    mask = stressed["cohort"] == cohort
+    stressed.loc[mask, "order_rate"] *= m["order"]
+    stressed.loc[mask, "vp_per_order"] *= m["vp"]
+    stressed.loc[mask, "retention_rate"] = (
+        stressed.loc[mask, "retention_rate"] * m["retention"]
+    ).clip(upper=1.0)
+    stressed.loc[mask, "vp_per_acquired_customer"] = (
+        stressed.loc[mask, "retention_rate"]
+        * stressed.loc[mask, "order_rate"]
+        * stressed.loc[mask, "vp_per_order"]
+    )
+
+stressed_summary = calculate_cohort_ltv(
+    stressed, horizon_months=horizon, monthly_discount=monthly_discount
+)
+
+compare = summary[["cohort", "cohort_label", "ltv_projected"]].merge(
+    stressed_summary[["cohort", "ltv_projected"]],
+    on="cohort",
+    suffixes=("_base", "_stressed"),
+)
+compare["delta"] = compare["ltv_projected_stressed"] - compare["ltv_projected_base"]
+st.dataframe(
+    compare.rename(
+        columns={
+            "cohort_label": "Cohort",
+            "ltv_projected_base": "Base LTV ($)",
+            "ltv_projected_stressed": "Stressed LTV ($)",
+            "delta": "Change ($)",
+        }
+    )[["Cohort", "Base LTV ($)", "Stressed LTV ($)", "Change ($)"]],
+    use_container_width=True,
+    hide_index=True,
+)
+
+# --- Curves over tenure ---
+st.subheader("3. Behaviour over tenure (average across vintages)")
+curve = average_tenure_curve(stressed)
+
+tab1, tab2, tab3 = st.tabs(["Order rate", "VP per acquired Cx", "Retention"])
+with tab1:
+    st.line_chart(
+        curve.pivot(index="tenure_month", columns="cohort_label", values="order_rate")
+    )
+with tab2:
+    st.line_chart(
+        curve.pivot(
+            index="tenure_month",
+            columns="cohort_label",
+            values="vp_per_acquired_customer",
+        )
+    )
+with tab3:
+    st.line_chart(
+        curve.pivot(index="tenure_month", columns="cohort_label", values="retention_rate")
+    )
+
+# --- Vintage LTV to date ---
+st.subheader("4. LTV to date by acquisition month")
+vintages = vintage_ltv_to_date(stressed)
+st.line_chart(
+    vintages.pivot(index="acquisition_month", columns="cohort_label", values="ltv_to_date")
+)
+
+# --- Investment / forecast helper ---
+st.subheader("5. Simple acquisition forecast")
+st.write(
+    "Uses projected (stressed) LTV × assumed new customers per month "
+    "to size portfolio value over your horizon."
+)
+
+acq = {}
+acq_cols = st.columns(4)
+defaults = {"nc_sub": 4200, "ec_sub": 500, "payg_nc": 9500, "payg_ec": 800}
+for col, (_, row) in zip(acq_cols, stressed_summary.iterrows()):
+    with col:
+        acq[row["cohort"]] = st.number_input(
+            f"New {row['cohort_label']} / month",
+            min_value=0,
+            value=int(defaults.get(row["cohort"], 1000)),
+            step=100,
+            key=f"acq_{row['cohort']}",
+        )
+
 forecast_rows = []
-for _, row in assumptions.iterrows():
-    base_cx = float(row["customers"])
-    acq = float(row["monthly_acquisition"])
-    for m in months:
-        # New cohorts grow with acquisition; existing stay flat + optional residual acq.
-        cx = base_cx + acq * m
+ltv_map = {
+    r.cohort: r.ltv_projected for r in stressed_summary.itertuples()
+}
+for m in range(1, horizon + 1):
+    for cohort, monthly in acq.items():
         forecast_rows.append(
             {
                 "month": m,
-                "cohort": row["cohort_label"],
-                "customers": cx,
-                "cumulative_ltv": cx * float(row["ltv"]),
-                "cumulative_vp": cx * float(row["vp"]),
-                "monthly_orders": cx * float(row["avg_order_frequency"]),
+                "cohort": multipliers[cohort]["label"],
+                "customers_acquired_cum": monthly * m,
+                "portfolio_ltv": monthly * m * ltv_map[cohort],
             }
         )
-
 forecast = pd.DataFrame(forecast_rows)
 
-chart_cx = forecast.pivot(index="month", columns="cohort", values="customers")
-chart_vp = forecast.pivot(index="month", columns="cohort", values="cumulative_vp")
+f1, f2 = st.columns(2)
+with f1:
+    st.markdown("**Cumulative customers acquired**")
+    st.line_chart(
+        forecast.pivot(index="month", columns="cohort", values="customers_acquired_cum")
+    )
+with f2:
+    st.markdown("**Cumulative portfolio LTV**")
+    st.line_chart(
+        forecast.pivot(index="month", columns="cohort", values="portfolio_ltv")
+    )
 
-col_a, col_b = st.columns(2)
-with col_a:
-    st.markdown("**Customers by cohort**")
-    st.line_chart(chart_cx)
-with col_b:
-    st.markdown("**Cumulative VP by cohort**")
-    st.line_chart(chart_vp)
+end = forecast[forecast["month"] == horizon]
+t1, t2 = st.columns(2)
+t1.metric("Customers acquired by horizon", f"{int(end['customers_acquired_cum'].sum()):,}")
+t2.metric("Portfolio LTV by horizon", f"${end['portfolio_ltv'].sum():,.0f}")
 
-end_month = forecast[forecast["month"] == horizon]
-st.markdown(f"**Month {horizon} totals**")
-t1, t2, t3 = st.columns(3)
-t1.metric("Projected customers", f"{int(end_month['customers'].sum()):,}")
-t2.metric("Projected portfolio LTV", f"${end_month['cumulative_ltv'].sum():,.0f}")
-t3.metric("Projected portfolio VP", f"${end_month['cumulative_vp'].sum():,.0f}")
-
-# --- Investment helper ---
-st.subheader("5. Investment decision helper")
-st.write(
-    "Rank cohorts by VP per customer and LTV per order-month to see where "
-    "incremental spend is most efficient under your assumptions."
-)
-
-helper = assumptions.copy()
-helper["vp_per_cx"] = helper["vp"]
-helper["ltv_per_order_month"] = helper.apply(
-    lambda r: (r["ltv"] / r["implied_orders_per_cx"])
-    if r["implied_orders_per_cx"]
-    else 0.0,
-    axis=1,
-)
-helper["acq_efficiency_vp"] = helper.apply(
-    lambda r: (r["vp"] / max(r["monthly_acquisition"], 1))
-    if r["monthly_acquisition"]
-    else None,
-    axis=1,
-)
-
-rank = helper[
-    [
-        "cohort_label",
-        "vp_per_cx",
-        "ltv",
-        "ltv_per_order_month",
-        "monthly_acquisition",
-        "acq_efficiency_vp",
-    ]
-].rename(
-    columns={
-        "cohort_label": "Cohort",
-        "vp_per_cx": "VP / Cx ($)",
-        "ltv": "LTV ($)",
-        "ltv_per_order_month": "LTV / order-month ($)",
-        "monthly_acquisition": "New Cx / month",
-        "acq_efficiency_vp": "VP per acquired Cx / monthly acq rate",
-    }
-).sort_values("VP / Cx ($)", ascending=False)
-
-st.dataframe(
-    rank,
-    use_container_width=True,
-    hide_index=True,
-    column_config={
-        "VP / Cx ($)": st.column_config.NumberColumn(format="%.2f"),
-        "LTV ($)": st.column_config.NumberColumn(format="%.2f"),
-        "LTV / order-month ($)": st.column_config.NumberColumn(format="%.2f"),
-        "VP per acquired Cx / monthly acq rate": st.column_config.NumberColumn(
-            format="%.4f"
-        ),
-    },
-)
-
-best = rank.iloc[0]["Cohort"]
+best = compare.sort_values("ltv_projected_stressed", ascending=False).iloc[0]
 st.success(
-    f"Under current assumptions, **{best}** has the highest VP per customer — "
-    f"a natural place to test incremental investment first."
+    f"Under current assumptions, **{best['cohort_label']}** has the highest stressed LTV "
+    f"(${best['ltv_projected_stressed']:,.0f}) — strongest candidate for incremental investment."
 )
 
-with st.expander("How the daily fake data refresh works"):
+with st.expander("How the data & LTV calculation work"):
     st.markdown(
         """
-1. On load, the app calls `src/cohort_data.py`.
-2. If `data/cohort_metrics.csv` is missing or dated before today, it regenerates
-   four cohort rows with light random noise around fixed baselines.
-3. The seed is the calendar date, so everyone sees the same numbers on a given day.
-4. Use **Refresh today's data** in the sidebar to force a rewrite.
-5. Later, swap `load_cohort_data()` for a real warehouse / API pull — keep the same columns.
+**Panel** (`data/cohort_panel.csv`): for each of the last 24 acquisition months,
+each cohort (NC Sub, EC Sub, PAYG NC, PAYG EC), and each tenure month M1…M24,
+we store retention, order rate, VP per order, and contribution per acquired customer.
+
+**LTV**: average those contribution curves across vintages, then sum from M1 to your
+horizon. Optional monthly discount turns this into a present-value LTV.
+
+**Daily refresh**: opening the app (or clicking the sidebar button) regenerates the
+fake panel when the calendar date changes.
         """
     )

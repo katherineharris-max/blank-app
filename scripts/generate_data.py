@@ -1,4 +1,4 @@
-"""Create or refresh data/cohort_metrics.csv for today."""
+"""Create / refresh the large cohort panel and LTV summary CSVs."""
 
 from pathlib import Path
 import sys
@@ -6,9 +6,13 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from cohort_data import refresh_dataset
+from cohort_panel import refresh_panel, PANEL_PATH
+from ltv import calculate_cohort_ltv, write_summary
 
 if __name__ == "__main__":
-    frame = refresh_dataset(force=True)
-    print(f"Wrote {len(frame)} rows to data/cohort_metrics.csv")
-    print(frame.to_string(index=False))
+    panel = refresh_panel(force=True)
+    summary = calculate_cohort_ltv(panel)
+    path = write_summary(summary)
+    print(f"Panel rows: {len(panel):,} → {PANEL_PATH}")
+    print(f"LTV summary → {path}")
+    print(summary.to_string(index=False))

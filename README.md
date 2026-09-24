@@ -1,24 +1,31 @@
-# Cohort LTV dashboard
+"""
+Cohort LTV dashboard
 
-Streamlit dashboard that models customer **LTV**, **VP** (variable profit), average order frequency, and average tenure for four cohorts:
+Large fake panel of NC Sub / EC Sub / PAYG NC / PAYG EC over acquisition months
+and tenure (M1..M24), with LTV calculated from the contribution curve and shown
+in a Streamlit dashboard.
 
-- New subscriber
-- Existing subscriber
-- New PAYG
-- Existing PAYG
+### LTV method
 
-Fake metrics live in `data/cohort_metrics.csv` and regenerate once per calendar day (seeded by date). Edit assumptions in the UI to forecast customers and compare investment scenarios.
+For each tenure month t:
+
+    contribution(t) = retention(t) × order_rate(t) × VP_per_order(t)
+
+LTV = sum of contribution(t) from M1 to a chosen horizon (optional monthly discount).
 
 ### How to run
 
 ```bash
 pip install -r requirements.txt
-python scripts/generate_data.py   # optional; app also refreshes on load
+python scripts/generate_data.py
 streamlit run streamlit_app.py
 ```
 
-### Daily refresh
+### Data files (regenerate daily on app load)
 
-- Automatic: opening the app rewrites the CSV when `as_of_date` is not today.
-- Manual: sidebar **Refresh today's data**, or `python scripts/generate_data.py`.
-- Production: replace `src/cohort_data.py` load path with your warehouse query; keep the same column names.
+| File | What it is |
+|------|------------|
+| `data/cohort_panel.csv` | Large time-series panel (vintage × cohort × tenure) |
+| `data/cohort_ltv_summary.csv` | Calculated LTV per cohort |
+
+On Windows, after unzipping the project, open Command Prompt in that folder, then run the commands above.

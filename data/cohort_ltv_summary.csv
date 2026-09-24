@@ -1,0 +1,5 @@
+cohort,cohort_label,ltv_observed,ltv_projected,horizon_months,monthly_discount,months_observed,avg_m1_order_rate,avg_m1_vp_per_order,avg_starting_customers
+ec_sub,EC Sub,547.49,547.49,24,0.0,24,3.478,11.034,3818
+nc_sub,NC Sub,224.3,224.3,24,0.0,24,2.824,9.495,4243
+payg_ec,PAYG EC,124.11,124.11,24,0.0,24,2.224,8.19,6060
+payg_nc,PAYG NC,47.82,47.82,24,0.0,24,1.608,7.009,9620
